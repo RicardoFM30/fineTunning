@@ -45,9 +45,9 @@ class AnálisisComparativo:
                 "id_experimento": carpeta_modelo,
                 "dataset": config.get("dataset", "desconocido"),
                 "modelo": config.get("model", "desconocido").split("/")[-1],
-                "tasa_aprendizaje": config.get("training_config", {}).get("learning_rate", "desconocido"),
-                "tamaño_lote": config.get("training_config", {}).get("batch_size", "desconocido"),
-                "épocas": config.get("training_config", {}).get("epochs", "desconocido"),
+                "tasa_aprendizaje": config.get("training_config", {}).get("tasa_aprendizaje", "desconocido"),
+                "tamaño_lote": config.get("training_config", {}).get("tamaño_lote", "desconocido"),
+                "épocas": config.get("training_config", {}).get("épocas", "desconocido"),
             }
             
             # Agregar métricas si existen

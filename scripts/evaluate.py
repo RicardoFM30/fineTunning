@@ -161,13 +161,13 @@ class EvaluadorAgotador:
 def main():
     analizador = argparse.ArgumentParser(description="Evaluación exhaustiva")
     analizador.add_argument("--model_dir", required=True, help="Directorio del modelo")
-    analizador.add_argument("--dataset", required=True, help="Dataset a evaluar")
+    analizador.add_argument("--conjunto_datos", required=True, help="Dataset a evaluar (imdb, ag_news, dbpedia)")
     analizador.add_argument("--output_dir", default="./results", help="Directorio de salida")
     
     argumentos = analizador.parse_args()
     
     evaluador = EvaluadorAgotador(argumentos.model_dir, argumentos.output_dir)
-    metricas, reporte = evaluador.ejecutar_evaluacion_completa(argumentos.dataset)
+    metricas, reporte = evaluador.ejecutar_evaluacion_completa(argumentos.conjunto_datos)
 
 
 if __name__ == "__main__":

@@ -18,140 +18,356 @@ from transformers import (
     TrainingArguments,
     Trainer,
 )
-import evaluate
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 
 
 class EntrenadorFineTuning:
-    """Clase para manejar fine-tuning modular."""
+    """
+    Clase para manejar fine-tuning modular de modelos preentrenados.
+    
+    Flujo:
+    1. cargar_dataset() - Carga el dataset especificado
+    2. tokenizar() - Tokeniza los textos
+    3. entrenar() - Entrena el modelo con los parámetros especificados
+    
+    Attributes:
+        configuracion: Diccionario con toda la configuración del proyecto
+        nombre_dataset: Nombre del dataset (imdb, ag_news, dbpedia)
+        nombre_modelo: Nombre del modelo HF (ej: distilbert-base-uncased)
+        configuracion_entrenamiento: Dict con hiperparámetros
+        dispositivo: Dispositivo computacional (cuda o cpu)
+        directorio_salida: Ruta donde se guardan los modelos
+    """
     
     def __init__(self, configuracion, nombre_dataset, nombre_modelo, configuracion_entrenamiento):
         """
+        Inicializa el entrenador.
+        
         Args:
-            configuracion: Diccionario de configuración general
-            nombre_dataset: Nombre del dataset a usar
+            configuracion: Diccionario de configuración general (cargado de config.yaml)
+            nombre_dataset: Nombre del dataset a usar (imdb, ag_news, dbpedia)
             nombre_modelo: Nombre del modelo HF (ej: distilbert-base-uncased)
-            configuracion_entrenamiento: Diccionario con hiperparámetros (lr, epochs, batch_size, etc)
+            configuracion_entrenamiento: Diccionario con hiperparámetros:
+                - tasa_aprendizaje: learning rate
+                - tamaño_lote: batch size
+                - épocas: número de epochs
+                - pasos_calentamiento: warmup steps
+                - decaimiento_peso: weight decay
         """
+        print(f"\n{'='*80}")
+        print(f"🏗️  INICIALIZANDO ENTRENADOR")
+        print(f"{'='*80}")
+        print(f"  Dataset: {nombre_dataset}")
+        print(f"  Modelo: {nombre_modelo}")
+        print(f"  Config: {configuracion_entrenamiento}")
+        print(f"{'='*80}\n")
+        
         self.configuracion = configuracion
         self.nombre_dataset = nombre_dataset
         self.nombre_modelo = nombre_modelo
         self.configuracion_entrenamiento = configuracion_entrenamiento
         self.dispositivo = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"✅ Dispositivo: {self.dispositivo}")
         
         # Crear directorio para este experimento
         nombre_experimento = f"{nombre_dataset}_{nombre_modelo.split('/')[-1]}_{int(datetime.now().timestamp())}"
-        self.directorio_salida = os.path.join(configuracion["paths"]["models_dir"], nombre_experimento)
+        self.directorio_salida = os.path.join(configuracion["rutas"]["directorio_modelos"], nombre_experimento)
         os.makedirs(self.directorio_salida, exist_ok=True)
+        print(f"✅ Directorio salida: {self.directorio_salida}\n")
         
     def cargar_dataset(self):
-        """Carga el dataset especificado."""
-        print(f"📦 Cargando dataset: {self.nombre_dataset}")
+        """
+        Carga el dataset especificado desde archivos CSV locales.
         
+        Soporta:
+        - resume_screening: CVs clasificados por tipo de profesional
+        - campus_recruitment: Perfiles de estudiantes y colocación
+        - student_performance: Desempeño académico de estudiantes
+        
+        El dataset se limita al tamaño especificado en config.yaml.
+        
+        Sets:
+            self.conjunto_entrenamiento: Dataset de entrenamiento
+            self.conjunto_prueba: Dataset de prueba
+            self.num_etiquetas: Número de clases
+        """
+        print(f"📦 Cargando dataset: {self.nombre_dataset}")
         config_dataset = self.configuracion["conjuntos_datos"][self.nombre_dataset]
         
-        if self.nombre_dataset == "imdb":
-            # Enlace: https://huggingface.co/datasets/imdb
-            conjunto_datos = load_dataset("imdb")
-            conjunto_entrenamiento = conjunto_datos["train"].shuffle(seed=42).select(range(config_dataset["tamaño_entrenamiento"]))
-            conjunto_prueba = conjunto_datos["test"].shuffle(seed=42).select(range(config_dataset["tamaño_prueba"]))
+        import pandas as pd
+        
+        # Rutas de los datasets
+        ruta_datos = self.configuracion["rutas"]["directorio_datos"]
+        
+        if self.nombre_dataset == "resume_screening":
+            # Resume Screening: Clasificar CVs por tipo de profesional
+            print(f"   Fuente: ./data/resume_screening.csv")
+            print(f"   Tarea: Clasificar CV → Tipo de profesional (IT, Finance, HR, etc.)")
             
-        elif self.nombre_dataset == "ag_news":
-            # Enlace: https://huggingface.co/datasets/ag_news
-            conjunto_datos = load_dataset("ag_news")
-            conjunto_entrenamiento = conjunto_datos["train"].shuffle(seed=42).select(range(config_dataset["tamaño_entrenamiento"]))
-            conjunto_prueba = conjunto_datos["test"].shuffle(seed=42).select(range(config_dataset["tamaño_prueba"]))
+            df = pd.read_csv(f"{ruta_datos}/resume_screening.csv")
             
-        elif self.nombre_dataset == "dbpedia":
-            # Enlace: https://huggingface.co/datasets/dbpedia_14
-            # Dataset público: https://www.dbpedia.org/
-            conjunto_datos = load_dataset("dbpedia_14")
-            conjunto_entrenamiento = conjunto_datos["train"].shuffle(seed=42).select(range(config_dataset["tamaño_entrenamiento"]))
-            conjunto_prueba = conjunto_datos["test"].shuffle(seed=42).select(range(config_dataset["tamaño_prueba"]))
+            # Renombrar columnas para estandarización
+            if "resume_text" in df.columns:
+                df = df.rename(columns={"resume_text": "text"})
+            if "Category" in df.columns:
+                df = df.rename(columns={"Category": "label"})
+            
+            # Seleccionar solo columnas necesarias
+            df = df[["text", "label"]].dropna()
+            
+            # Convertir labels a índices numéricos
+            labels_unicos = df["label"].unique()
+            label_to_id = {label: idx for idx, label in enumerate(labels_unicos)}
+            df["label"] = df["label"].map(label_to_id)
+            
+            # Dividir en train/test
+            tamaño_entrenamiento = min(config_dataset["tamaño_entrenamiento"], len(df) // 2)
+            tamaño_prueba = min(config_dataset["tamaño_prueba"], len(df) // 4)
+            
+            conjunto_entrenamiento = Dataset.from_pandas(df.head(tamaño_entrenamiento))
+            conjunto_prueba = Dataset.from_pandas(df.iloc[len(df)//2:len(df)//2 + tamaño_prueba])
+            
+            num_etiquetas = len(labels_unicos)
+            
+        elif self.nombre_dataset == "campus_recruitment":
+            # Campus Recruitment: Clasificar por estado de colocación
+            print(f"   Fuente: ./data/campus_recruitment.csv")
+            print(f"   Tarea: Predecir colocación de estudiante (Colocado/No colocado)")
+            
+            df = pd.read_csv(f"{ruta_datos}/campus_recruitment.csv")
+            
+            # Crear un "texto" sintetizado a partir de características
+            def crear_texto_perfil(row):
+                textos = []
+                if "Degree" in row and pd.notna(row["Degree"]):
+                    textos.append(f"Carrera: {row['Degree']}")
+                if "specialization" in row.index and pd.notna(row.get("specialization")):
+                    textos.append(f"Especialización: {row['specialization']}")
+                if "cgpa" in row.index and pd.notna(row.get("cgpa")):
+                    textos.append(f"CGPA: {row['cgpa']}")
+                if "internships" in row.index and pd.notna(row.get("internships")):
+                    textos.append(f"Pasantías: {row['internships']}")
+                return " ".join(textos) if textos else "Estudiante"
+            
+            df["text"] = df.apply(crear_texto_perfil, axis=1)
+            
+            # Columna de etiqueta
+            if "status" in df.columns:
+                df = df.rename(columns={"status": "label"})
+            
+            # Convertir labels a índices
+            label_values = df["label"].unique()
+            label_to_id = {label: idx for idx, label in enumerate(label_values) if pd.notna(label)}
+            df["label"] = df["label"].map(label_to_id)
+            df = df.dropna(subset=["label"])
+            
+            # Dividir
+            tamaño_entrenamiento = min(config_dataset["tamaño_entrenamiento"], len(df) // 2)
+            tamaño_prueba = min(config_dataset["tamaño_prueba"], len(df) // 4)
+            
+            conjunto_entrenamiento = Dataset.from_pandas(df.head(tamaño_entrenamiento)[["text", "label"]])
+            conjunto_prueba = Dataset.from_pandas(df.iloc[len(df)//2:len(df)//2 + tamaño_prueba][["text", "label"]])
+            
+            num_etiquetas = len(label_to_id)
+            
+        elif self.nombre_dataset == "student_performance":
+            # Student Performance: Clasificar por desempeño
+            print(f"   Fuente: ./data/student_performance.csv")
+            print(f"   Tarea: Clasificar nivel de rendimiento académico")
+            
+            df = pd.read_csv(f"{ruta_datos}/student_performance.csv")
+            
+            # Crear texto sintetizado
+            def crear_texto_academico(row):
+                textos = []
+                for col in ["gender", "race/ethnicity", "parental level of education", "lunch", "test preparation course"]:
+                    if col in row.index and pd.notna(row[col]):
+                        textos.append(f"{col}: {row[col]}")
+                return " ".join(textos) if textos else "Estudiante"
+            
+            df["text"] = df.apply(crear_texto_academico, axis=1)
+            
+            # Crear etiqueta basada en puntaje promedio
+            if "math score" in df.columns and "reading score" in df.columns and "writing score" in df.columns:
+                df["puntuacion_promedio"] = (df["math score"] + df["reading score"] + df["writing score"]) / 3
+                df["label"] = pd.cut(df["puntuacion_promedio"], bins=3, labels=["Bajo", "Medio", "Alto"], include_lowest=True)
+                label_to_id = {"Bajo": 0, "Medio": 1, "Alto": 2}
+                df["label"] = df["label"].astype(str).map(label_to_id)
+            
+            df = df.dropna(subset=["label"])
+            
+            # Dividir
+            tamaño_entrenamiento = min(config_dataset["tamaño_entrenamiento"], len(df) // 2)
+            tamaño_prueba = min(config_dataset["tamaño_prueba"], len(df) // 4)
+            
+            conjunto_entrenamiento = Dataset.from_pandas(df.head(tamaño_entrenamiento)[["text", "label"]])
+            conjunto_prueba = Dataset.from_pandas(df.iloc[len(df)//2:len(df)//2 + tamaño_prueba][["text", "label"]])
+            
+            num_etiquetas = 3  # Bajo, Medio, Alto
             
         else:
-            raise ValueError(f"Dataset {self.nombre_dataset} no soportado")
+            raise ValueError(f"❌ Dataset {self.nombre_dataset} no soportado. Disponibles: resume_screening, campus_recruitment, student_performance")
         
         self.conjunto_entrenamiento = conjunto_entrenamiento
         self.conjunto_prueba = conjunto_prueba
-        self.num_etiquetas = config_dataset["num_etiquetas"]
+        self.num_etiquetas = num_etiquetas
+        
         print(f"✅ Dataset cargado: {config_dataset['nombre']}")
+        print(f"   Muestras entrenamiento: {len(conjunto_entrenamiento)}")
+        print(f"   Muestras prueba: {len(conjunto_prueba)}")
+        print(f"   Clases: {self.num_etiquetas}\n")
+        
         return self.conjunto_entrenamiento, self.conjunto_prueba
     
     def tokenizar(self):
-        """Tokeniza los datasets."""
-        print(f"🔤 Tokenizando con {self.nombre_modelo}...")
+        """
+        Tokeniza los textos de los datasets usando el tokenizador del modelo.
         
-        tokenizador = AutoTokenizer.from_pretrained(self.nombre_modelo)
+        Proceso:
+        1. Carga el tokenizador preentrenado
+        2. Define función de tokenización con:
+           - padding: rellena a longitud máxima
+           - truncation: recorta textos largos
+           - max_length: 256 tokens
+        3. Aplica tokenización a datasets entrenamiento y prueba
+        4. Elimina columnas de texto (ya no necesarias)
+        
+        Sets:
+            self.tokenizador: Tokenizador del modelo
+            self.tokenizado_entrenamiento: Dataset tokenizado (train)
+            self.tokenizado_prueba: Dataset tokenizado (test)
+        """
+        print(f"🔤 Tokenizando datasets con {self.nombre_modelo}...")
+        
+        self.tokenizador = AutoTokenizer.from_pretrained(self.nombre_modelo)
+        print(f"✅ Tokenizador cargado\n")
         
         def funcion_tokenizar(ejemplos):
-            # El campo de texto varía según dataset
-            campo_texto = "text" if "text" in ejemplos else "title"
-            return tokenizador(
+            """Tokeniza un batch de ejemplos."""
+            # El campo de texto varía: "text" (IMDB, AG News), "content" (DBpedia)
+            campo_texto = "text" if "text" in ejemplos else ("title" if "title" in ejemplos else "content")
+            
+            return self.tokenizador(
                 ejemplos[campo_texto],
                 padding="max_length",
                 truncation=True,
                 max_length=256
             )
         
-        tokenizado_entrenamiento = self.conjunto_entrenamiento.map(funcion_tokenizar, batched=True)
-        tokenizado_prueba = self.conjunto_prueba.map(funcion_tokenizar, batched=True)
+        print(f"🔄 Tokenizando entrenamiento ({len(self.conjunto_entrenamiento)} ejemplos)...")
+        self.tokenizado_entrenamiento = self.conjunto_entrenamiento.map(funcion_tokenizar, batched=True)
         
-        # Remover columnas no necesarias
-        tokenizado_entrenamiento = tokenizado_entrenamiento.remove_columns(["text" if "text" in tokenizado_entrenamiento.column_names else "title"])
-        tokenizado_prueba = tokenizado_prueba.remove_columns(["text" if "text" in tokenizado_prueba.column_names else "title"])
+        print(f"🔄 Tokenizando prueba ({len(self.conjunto_prueba)} ejemplos)...")
+        self.tokenizado_prueba = self.conjunto_prueba.map(funcion_tokenizar, batched=True)
         
-        self.tokenizador = tokenizador
-        self.tokenizado_entrenamiento = tokenizado_entrenamiento
-        self.tokenizado_prueba = tokenizado_prueba
-        print("✅ Tokenización completada")
-        return tokenizado_entrenamiento, tokenizado_prueba
+        # Remover columnas de texto (ya no necesarias)
+        columna_a_eliminar = "text" if "text" in self.tokenizado_entrenamiento.column_names else ("title" if "title" in self.tokenizado_entrenamiento.column_names else "content")
+        self.tokenizado_entrenamiento = self.tokenizado_entrenamiento.remove_columns([columna_a_eliminar])
+        self.tokenizado_prueba = self.tokenizado_prueba.remove_columns([columna_a_eliminar])
+        
+        print(f"✅ Tokenización completada")
+        print(f"   Columnas finales: {self.tokenizado_entrenamiento.column_names}\n")
+        
+        return self.tokenizado_entrenamiento, self.tokenizado_prueba
     
     def calcular_metricas(self, predicciones_evaluacion):
-        """Calcula métricas de evaluación."""
+        """
+        Calcula métricas de evaluación completas durante el entrenamiento.
+        
+        Se ejecuta después de cada epoch de validación.
+        
+        Métricas calculadas:
+        - Exactitud: % de predicciones correctas
+        - F1 (weighted): Balance entre precisión y recall
+        - Precisión (weighted): % de positivos predichos correctos
+        - Recall (weighted): % de positivos reales detectados
+        
+        Args:
+            predicciones_evaluacion: Tupla (logits, etiquetas)
+                - logits: Salida bruta del modelo
+                - etiquetas: Etiquetas verdaderas
+        
+        Returns:
+            dict: Diccionario con todas las métricas calculadas
+        """
         predicciones, etiquetas = predicciones_evaluacion
-        predicciones = np.argmax(predicciones, axis=1)
+        predicciones = np.argmax(predicciones, axis=1)  # Convierte logits a clases
         
-        # Cargar todas las métricas necesarias
-        exactitud = evaluate.load("accuracy")
-        f1 = evaluate.load("f1")
-        precision = evaluate.load("precision")
-        recall = evaluate.load("recall")
-        
+        # Usar sklearn.metrics para calcular métricas (más eficiente)
         metricas = {
-            "accuracy": exactitud.compute(predictions=predicciones, references=etiquetas)["accuracy"],
-            "f1": f1.compute(predictions=predicciones, references=etiquetas, average="weighted")["f1"],
-            "precision": precision.compute(predictions=predicciones, references=etiquetas, average="weighted")["precision"],
-            "recall": recall.compute(predictions=predicciones, references=etiquetas, average="weighted")["recall"],
+            "accuracy": accuracy_score(etiquetas, predicciones),
+            "f1": f1_score(etiquetas, predicciones, average="weighted", zero_division=0),
+            "precision": precision_score(etiquetas, predicciones, average="weighted", zero_division=0),
+            "recall": recall_score(etiquetas, predicciones, average="weighted", zero_division=0),
         }
         return metricas
     
     def entrenar(self):
-        """Entrena el modelo."""
-        print(f"🚀 Iniciando entrenamiento con config: {self.configuracion_entrenamiento}")
+        """
+        Entrena el modelo preentrenado en el dataset especificado.
+        
+        Pasos:
+        1. Carga el modelo preentrenado
+        2. Configura los argumentos de entrenamiento
+        3. Crea el Trainer de Hugging Face
+        4. Ejecuta el entrenamiento
+        5. Guarda el modelo y la configuración
+        
+        Returns:
+            tuple: (entrenador, resultado_entrenamiento)
+        """
+        print(f"\n{'='*80}")
+        print(f"🚀 INICIANDO ENTRENAMIENTO")
+        print(f"{'='*80}")
+        print(f"Configuración:")
+        for clave, valor in self.configuracion_entrenamiento.items():
+            print(f"  - {clave}: {valor}")
+        print(f"{'='*80}\n")
         
         # Cargar modelo
+        print(f"📥 Cargando modelo: {self.nombre_modelo}...")
         modelo = AutoModelForSequenceClassification.from_pretrained(
             self.nombre_modelo,
             num_labels=self.num_etiquetas
         ).to(self.dispositivo)
+        print(f"✅ Modelo cargado en {self.dispositivo}\n")
+        
+        # Convertir strings a números si es necesario (por si vienen de YAML)
+        tasa_aprendizaje = float(self.configuracion_entrenamiento["tasa_aprendizaje"])
+        tamaño_lote = int(self.configuracion_entrenamiento["tamaño_lote"])
+        épocas = int(self.configuracion_entrenamiento["épocas"])
+        pasos_calentamiento = int(self.configuracion_entrenamiento.get("pasos_calentamiento", 500))
+        decaimiento_peso = float(self.configuracion_entrenamiento.get("decaimiento_peso", 0.01))
+        
+        print(f"📊 Hiperparámetros procesados:")
+        print(f"  - Tasa aprendizaje: {tasa_aprendizaje}")
+        print(f"  - Tamaño lote: {tamaño_lote}")
+        print(f"  - Épocas: {épocas}")
+        print(f"  - Pasos calentamiento: {pasos_calentamiento}")
+        print(f"  - Decaimiento peso: {decaimiento_peso}\n")
         
         # Configurar argumentos de entrenamiento
+        print(f"⚙️  Configurando argumentos de entrenamiento...")
         argumentos_entrenamiento = TrainingArguments(
             output_dir=self.directorio_salida,
             evaluation_strategy="epoch",
             save_strategy="epoch",
-            learning_rate=self.configuracion_entrenamiento["learning_rate"],
-            per_device_train_batch_size=self.configuracion_entrenamiento["batch_size"],
-            per_device_eval_batch_size=self.configuracion_entrenamiento["batch_size"],
-            num_train_epochs=self.configuracion_entrenamiento["epochs"],
-            weight_decay=self.configuracion_entrenamiento["weight_decay"],
-            warmup_steps=self.configuracion_entrenamiento.get("warmup_steps", 500),
+            learning_rate=tasa_aprendizaje,
+            per_device_train_batch_size=tamaño_lote,
+            per_device_eval_batch_size=tamaño_lote,
+            num_train_epochs=épocas,
+            weight_decay=decaimiento_peso,
+            warmup_steps=pasos_calentamiento,
             load_best_model_at_end=True,
             metric_for_best_model="f1",
             seed=42,
+            logging_steps=10,
+            save_total_limit=2,
         )
+        print(f"✅ Argumentos configurados\n")
         
         # Crear entrenador
+        print(f"🤖 Creando Trainer...")
         entrenador = Trainer(
             model=modelo,
             args=argumentos_entrenamiento,
@@ -159,13 +375,23 @@ class EntrenadorFineTuning:
             eval_dataset=self.tokenizado_prueba,
             compute_metrics=self.calcular_metricas,
         )
+        print(f"✅ Trainer creado\n")
         
         # Entrenar
+        print(f"\n{'='*80}")
+        print(f"⏳ ENTRENANDO MODELO...")
+        print(f"{'='*80}\n")
         resultado_entrenamiento = entrenador.train()
+        
+        # Guardar
+        print(f"\n{'='*80}")
+        print(f"💾 GUARDANDO MODELO")
+        print(f"{'='*80}")
         entrenador.save_model(self.directorio_salida)
         self.tokenizador.save_pretrained(self.directorio_salida)
+        print(f"✅ Modelo guardado en: {self.directorio_salida}")
         
-        # Guardar configuración
+        # Guardar configuración de entrenamiento
         archivo_config = os.path.join(self.directorio_salida, "training_config.json")
         with open(archivo_config, "w") as archivo:
             json.dump({
@@ -174,29 +400,100 @@ class EntrenadorFineTuning:
                 "training_config": self.configuracion_entrenamiento,
                 "results": resultado_entrenamiento.metrics,
             }, archivo, indent=2)
+        print(f"✅ Configuración guardada\n")
         
-        print(f"✅ Modelo guardado en: {self.directorio_salida}")
+        print(f"{'='*80}")
+        print(f"✨ ENTRENAMIENTO COMPLETADO")
+        print(f"{'='*80}\n")
+        
         return entrenador, resultado_entrenamiento
 
 
 def main():
-    analizador = argparse.ArgumentParser(description="Fine-tuning modular")
-    analizador.add_argument("--archivo_config", default="config.yaml", help="Ruta al archivo de configuración")
-    analizador.add_argument("--conjunto_datos", required=True, help="Nombre del dataset (imdb, ag_news, dbpedia)")
-    analizador.add_argument("--modelo", default="distilbert-base-uncased", help="Modelo HF")
-    analizador.add_argument("--nombre_config", required=True, help="Nombre de configuración (config_1, config_2, etc)")
+    """
+    Función principal: parsea argumentos y ejecuta el flujo completo de entrenamiento.
+    
+    Uso:
+        python scripts/train.py \\
+            --conjunto_datos resume_screening \\
+            --nombre_config config_1 \\
+            --modelo distilbert-base-uncased
+    
+    Argumentos:
+        --archivo_config: Ruta al config.yaml (default: config.yaml)
+        --conjunto_datos: Dataset a usar (resume_screening, campus_recruitment, student_performance) - REQUERIDO
+        --modelo: Modelo HF (default: distilbert-base-uncased)
+        --nombre_config: Nombre de configuración en config.yaml (config_1, config_2...) - REQUERIDO
+    
+    Flujo:
+        1. Parsea argumentos de línea de comandos
+        2. Carga configuración desde YAML
+        3. Extrae configuración de hiperparámetros
+        4. Crea instancia de EntrenadorFineTuning
+        5. Ejecuta: cargar_dataset() → tokenizar() → entrenar()
+    """
+    analizador = argparse.ArgumentParser(
+        description="Fine-tuning de modelos preentrenados para análisis de talento estudiantil",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Ejemplos de uso:
+  # Resume Screening con configuración 1
+  python scripts/train.py --conjunto_datos resume_screening --nombre_config config_1
+  
+  # Campus Recruitment con configuración 2
+  python scripts/train.py --conjunto_datos campus_recruitment --nombre_config config_2
+  
+  # Student Performance con BERT en lugar de DistilBERT
+  python scripts/train.py --conjunto_datos student_performance --nombre_config config_3 --modelo bert-base-uncased
+        """
+    )
+    analizador.add_argument(
+        "--archivo_config",
+        default="config.yaml",
+        help="Ruta al archivo de configuración YAML"
+    )
+    analizador.add_argument(
+        "--conjunto_datos",
+        required=True,
+        choices=["resume_screening", "campus_recruitment", "student_performance"],
+        help="Dataset a usar para el entrenamiento"
+    )
+    analizador.add_argument(
+        "--modelo",
+        default="distilbert-base-uncased",
+        help="Modelo preentrenado de Hugging Face"
+    )
+    analizador.add_argument(
+        "--nombre_config",
+        required=True,
+        help="Nombre de la configuración en config.yaml (ej: config_1, config_2)"
+    )
     
     argumentos = analizador.parse_args()
     
     # Cargar configuración
+    print(f"\n📂 Cargando configuración desde: {argumentos.archivo_config}")
     import yaml
-    with open(argumentos.archivo_config, "r") as archivo:
+    with open(argumentos.archivo_config, "r", encoding="utf-8") as archivo:
         configuracion = yaml.safe_load(archivo)
+    print(f"✅ Configuración cargada\n")
+    
+    # Verificar que existe la configuración especificada
+    if argumentos.nombre_config not in configuracion["configuraciones_entrenamiento"]:
+        raise ValueError(
+            f"❌ Configuración '{argumentos.nombre_config}' no encontrada.\n"
+            f"   Disponibles: {list(configuracion['configuraciones_entrenamiento'].keys())}"
+        )
     
     configuracion_entrenamiento = configuracion["configuraciones_entrenamiento"][argumentos.nombre_config]
     
     # Crear y ejecutar entrenador
-    objeto_entrenador = EntrenadorFineTuning(configuracion, argumentos.conjunto_datos, argumentos.modelo, configuracion_entrenamiento)
+    objeto_entrenador = EntrenadorFineTuning(
+        configuracion,
+        argumentos.conjunto_datos,
+        argumentos.modelo,
+        configuracion_entrenamiento
+    )
     objeto_entrenador.cargar_dataset()
     objeto_entrenador.tokenizar()
     objeto_entrenador.entrenar()

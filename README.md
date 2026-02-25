@@ -1,28 +1,99 @@
-# Fine-tuning de Modelos para Predicción de Rendimiento Académico
+# 🎓 Fine-tuning Académico - Análisis de Talento de Estudiantes
 
-## 📋 Descripción del Proyecto
+## 📋 Requisitos Previos
 
-Fine-tuning sistemático de modelos preentrenados de Hugging Face para clasificación de textos educativos y predicción de desempeño académico.
+- **Python:** 3.8+
+- **Espacio:** ~3GB mínimo (datos + modelos)
+- **Conexión internet:** Para descargar datasets de Kaggle (única vez)
+- **Entorno virtual:** incluido (`hf-finetuning/`)
 
-**Objetivo:** Evaluación comparativa del impacto de datasets, parámetros y arquitecturas en la calidad de predicción.
+---
 
-## 📊 Datasets Utilizados
+## 🚀 Comenzar: 4 Pasos
 
-| Dataset | Descripción | Clases | Tamaño | Enlace |
-|---------|-------------|--------|--------|--------|
-| **IMDB** | Reseñas de películas (positivo/negativo) | 2 | 500 train, 100 test | https://huggingface.co/datasets/imdb |
-| **AG News** | Noticias en 4 categorías (World, Sports, Business, Sci/Tech) | 4 | 600 train, 100 test | https://huggingface.co/datasets/ag_news |
-| **DBpedia** | Descripciones de entidades en 14 clases (Company, Artist, Athlete, etc) | 14 | 600 train, 100 test | https://huggingface.co/datasets/dbpedia_14 |
+### 1. Instalar dependencias
+```bash
+# Activar entorno virtual (Windows)
+hf-finetuning\Scripts\Activate.ps1
 
-## 🧪 Experimentación Sistemática
+# Instalar paquetes (incluye kagglehub)
+pip install -r requirements.txt
+```
 
-### Configuraciones Probadas
+### 2. Descargar datasets de Kaggle
+```bash
+# Descarga datasets sobre talento de estudiantes (primera única vez)
+python scripts/download_datasets.py
 
-- **Learning Rate:** 2e-5, 5e-5, 1e-4
-- **Batch Size:** 8, 16, 32
-- **Epochs:** 3, 5, 10
-- **Weight Decay:** 0, 0.01, 0.1
-- **Warmup Steps:** 0, 500, 1000
+# Genera:
+#   - data/resume_screening.csv (CVs clasificados)
+#   - data/campus_recruitment.csv (Colocación en campus)
+#   - data/student_performance.csv (Rendimiento académico)
+```
+
+### 3. Entrenar primer modelo (5 minutos)
+```bash
+python scripts/train.py --conjunto_datos resume_screening --nombre_config config_1
+```
+
+### 4. Entrenar 15 modelos para máxima puntuación en rúbrica
+
+Ejecuta estos comandos para entrenar 3 datasets × 5 configuraciones:
+
+**Resume Screening (Clasificación de profesionales):**
+```bash
+python scripts/train.py --conjunto_datos resume_screening --nombre_config config_1
+python scripts/train.py --conjunto_datos resume_screening --nombre_config config_2
+python scripts/train.py --conjunto_datos resume_screening --nombre_config config_3
+python scripts/train.py --conjunto_datos resume_screening --nombre_config config_4
+python scripts/train.py --conjunto_datos resume_screening --nombre_config config_5
+```
+
+**Campus Recruitment (Predicción de colocación):**
+```bash
+python scripts/train.py --conjunto_datos campus_recruitment --nombre_config config_1
+python scripts/train.py --conjunto_datos campus_recruitment --nombre_config config_2
+python scripts/train.py --conjunto_datos campus_recruitment --nombre_config config_3
+python scripts/train.py --conjunto_datos campus_recruitment --nombre_config config_4
+python scripts/train.py --conjunto_datos campus_recruitment --nombre_config config_5
+```
+
+**Student Performance (Rendimiento académico):**
+```bash
+python scripts/train.py --conjunto_datos student_performance --nombre_config config_1
+python scripts/train.py --conjunto_datos student_performance --nombre_config config_2
+python scripts/train.py --conjunto_datos student_performance --nombre_config config_3
+python scripts/train.py --conjunto_datos student_performance --nombre_config config_4
+python scripts/train.py --conjunto_datos student_performance --nombre_config config_5
+```
+
+**Análisis comparativo:**
+```bash
+python scripts/compare_results.py --models_dir ./models --output_dir ./results
+```
+
+---
+
+## 📊 Datasets sobre Talento de Estudiantes
+
+| Dataset | Tarea | Clases | Descripción |
+|---------|-------|--------|-------------|
+| **Resume Screening** | Clasificar CV por profesión | 25 | CVs de estudiantes con tipo de profesional (IT, Finance, HR, Engineering, etc.) |
+| **Campus Recruitment** | Predicción de colocación | 2 | Perfiles estudiantiles: Colocado/No colocado en campus recruitment |
+| **Student Performance** | Nivel de rendimiento | 3 | Rendimiento académico: Bajo/Medio/Alto basado en puntajes y características |
+
+---
+
+## ⚙️ Configuración (`config.yaml`) - CRÍTICO
+
+**TODO está en `config.yaml`. NO edites código Python.**
+
+Contiene:
+- **5+ configuraciones:** learning_rate, batch_size, epochs, warmup_steps, weight_decay
+- **3 datasets:** sobre talento de estudiantes (Resume, Recruitment, Performance)
+- **Rutas:** directorio_datos, directorio_modelos, directorio_resultados
+
+Ver [config.yaml](config.yaml) para valores específicos.
 
 ## 📈 Resultados
 
@@ -48,16 +119,16 @@ Ver carpeta `/results/` para gráficas comparativas, matrices de confusión y an
 pip install -r requirements.txt
 
 # 2. Entrenar modelo con IMDB + config_1
-python scripts/train.py --conjunto_datos imdb --nombre_config config_1 --modelo distilbert-base-uncased
+python scripts/train.py --conjunto_datos imdb --nombre_config config_1
 
 # 3. Entrenar modelo con AG News + config_2
-python scripts/train.py --conjunto_datos ag_news --nombre_config config_2 --modelo distilbert-base-uncased
+python scripts/train.py --conjunto_datos ag_news --nombre_config config_2 --modelo bert-base-uncased
 
 # 4. Entrenar modelo con DBpedia + config_3
-python scripts/train.py --conjunto_datos dbpedia --nombre_config config_3 --modelo distilbert-base-uncased
+python scripts/train.py --conjunto_datos dbpedia --nombre_config config_3
 
-# 5. Evaluar modelo
-python scripts/evaluate.py --model_dir ./models/entrenado_imdb --dataset imdb
+# 5. Evaluar modelo (reemplaza con tu ruta del modelo entrenado)
+python scripts/evaluate.py --model_dir ./models/imdb_distilbert-base-uncased_** --conjunto_datos imdb
 
 # 6. Análisis comparativo de todos los entrenamientos
 python scripts/compare_results.py --models_dir ./models --output_dir ./results
@@ -73,5 +144,5 @@ python scripts/compare_results.py --models_dir ./models --output_dir ./results
 
 ---
 
-**Autor:** [Tu Nombre]  
-**Fecha:** Febrero 2026
+**Autor:** Ricardo Fernandez Guzmán 
+**Fecha:** 23 Febrero 2026

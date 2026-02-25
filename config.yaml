@@ -43,33 +43,32 @@ configuraciones_entrenamiento:
     pasos_calentamiento: 1000
     decaimiento_peso: 0.1
 
-# Datasets Reales
-# Fuente: https://huggingface.co/datasets
+# Datasets sobre Talento de Estudiantes
+# Fuentes: Kaggle (descargados automáticamente con kagglehub)
 conjuntos_datos:
-  imdb:
-    nombre: "IMDB Movie Reviews"
-    # Enlace: https://huggingface.co/datasets/imdb
+  resume_screening:
+    nombre: "Resume Screening - Clasificación de Profesionales"
+    tamaño_entrenamiento: 1000
+    tamaño_prueba: 200
+    num_etiquetas: 25
+    descripcion: "Clasificar CVs de estudiantes por tipo de profesional (IT, Finance, HR, Engineering, etc.)"
+    fuente: "https://www.kaggle.com/datasets/mfaisalqureshi/resume-screening-dataset"
+    
+  campus_recruitment:
+    nombre: "Campus Recruitment - Predicción de Colocación"
+    tamaño_entrenamiento: 100
+    tamaño_prueba: 30
+    num_etiquetas: 2
+    descripcion: "Predecir si un estudiante será colocado en campus recruitment"
+    fuente: "https://www.kaggle.com/datasets/benroshan/campus-recruitment-data"
+    
+  student_performance:
+    nombre: "Student Performance - Rendimiento Académico"
     tamaño_entrenamiento: 500
     tamaño_prueba: 100
-    num_etiquetas: 2
-    descripcion: "Reseñas de películas clasificadas como positivas/negativas"
-    
-  ag_news:
-    nombre: "AG News Categories"
-    # Enlace: https://huggingface.co/datasets/ag_news
-    tamaño_entrenamiento: 600
-    tamaño_prueba: 100
-    num_etiquetas: 4
-    descripcion: "Noticias clasificadas en 4 categorías: World, Sports, Business, Sci/Tech"
-    
-  dbpedia:
-    nombre: "DBpedia 14 Classes"
-    # Enlace: https://huggingface.co/datasets/dbpedia_14
-    # Dataset público: https://www.dbpedia.org/
-    tamaño_entrenamiento: 600
-    tamaño_prueba: 100
-    num_etiquetas: 14
-    descripcion: "Descripciones de entidades DBpedia en 14 categorías: Company, Artist, Athlete, etc"
+    num_etiquetas: 3
+    descripcion: "Clasificar nivel de rendimiento académico (Bajo/Medio/Alto) basado en características educativas"
+    fuente: "https://www.kaggle.com/datasets/spscientist/students-performance-in-exams"
 
 # Rutas
 rutas:
