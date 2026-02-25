@@ -20,12 +20,15 @@ hf-finetuning\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-### 2. Descargar datasets de Kaggle
+### 2. Preparar datasets CSV (manual o automático)
 ```bash
-# Descarga datasets sobre talento de estudiantes (primera única vez)
+# Verifica qué CSV faltan y muestra URLs para descarga manual
 python scripts/download_datasets.py
 
-# Genera:
+# Si quieres intentar descarga automática por Kaggle:
+python scripts/download_datasets.py --kaggle
+
+# Debes tener estos archivos en ./data:
 #   - data/resume_screening.csv (CVs clasificados)
 #   - data/campus_recruitment.csv (Colocación en campus)
 #   - data/student_performance.csv (Rendimiento académico)
@@ -118,17 +121,17 @@ Ver carpeta `/results/` para gráficas comparativas, matrices de confusión y an
 # 1. Instalar dependencias
 pip install -r requirements.txt
 
-# 2. Entrenar modelo con IMDB + config_1
-python scripts/train.py --conjunto_datos imdb --nombre_config config_1
+# 2. Entrenar modelo con Resume Screening + config_1
+python scripts/train.py --conjunto_datos resume_screening --nombre_config config_1
 
-# 3. Entrenar modelo con AG News + config_2
-python scripts/train.py --conjunto_datos ag_news --nombre_config config_2 --modelo bert-base-uncased
+# 3. Entrenar modelo con Campus Recruitment + config_2
+python scripts/train.py --conjunto_datos campus_recruitment --nombre_config config_2 --modelo bert-base-uncased
 
-# 4. Entrenar modelo con DBpedia + config_3
-python scripts/train.py --conjunto_datos dbpedia --nombre_config config_3
+# 4. Entrenar modelo con Student Performance + config_3
+python scripts/train.py --conjunto_datos student_performance --nombre_config config_3
 
 # 5. Evaluar modelo (reemplaza con tu ruta del modelo entrenado)
-python scripts/evaluate.py --model_dir ./models/imdb_distilbert-base-uncased_** --conjunto_datos imdb
+python scripts/evaluate.py --model_dir ./models/resume_screening_distilbert-base-uncased_** --conjunto_datos resume_screening
 
 # 6. Análisis comparativo de todos los entrenamientos
 python scripts/compare_results.py --models_dir ./models --output_dir ./results

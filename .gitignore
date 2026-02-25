@@ -1,5 +1,6 @@
 # Entorno Virtual
 hf-finetuning/
+fineTunning/
 venv/
 env/
 ENV/

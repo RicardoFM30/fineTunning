@@ -1,76 +1,204 @@
 """
-Utilidades para cargar datasets reales de Hugging Face
-Datasets utilizados:
-- IMDB: https://huggingface.co/datasets/imdb
-- AG News: https://huggingface.co/datasets/ag_news
-- DBpedia: https://huggingface.co/datasets/dbpedia_14 (https://www.dbpedia.org/)
+Utilidades para cargar datasets de talento estudiantil/juvenil desde CSV.
 """
 
+import os
 import pandas as pd
 from datasets import Dataset, DatasetDict
 
 
-def cargar_dataset_csv_personalizado(ruta_csv, columna_texto="texto", columna_etiqueta="etiqueta", tamaño_entrenamiento=400, tamaño_prueba=100):
+def _normalizar_resume_screening(df):
+    if "resume_text" in df.columns and "Category" in df.columns:
+        df = df.rename(columns={"resume_text": "text", "Category": "label"})
+        df = df[["text", "label"]].dropna()
+    elif "Job Role" in df.columns:
+        def crear_texto_cv(row):
+            partes = []
+            if "Skills" in row.index and pd.notna(row["Skills"]):
+                partes.append(f"Skills: {row['Skills']}")
+            if "Experience (Years)" in row.index and pd.notna(row["Experience (Years)"]):
+                partes.append(f"ExperienceYears: {row['Experience (Years)']}")
+            if "Education" in row.index and pd.notna(row["Education"]):
+                partes.append(f"Education: {row['Education']}")
+            if "Certifications" in row.index and pd.notna(row["Certifications"]):
+                partes.append(f"Certifications: {row['Certifications']}")
+            if "Projects Count" in row.index and pd.notna(row["Projects Count"]):
+                partes.append(f"ProjectsCount: {row['Projects Count']}")
+            if "AI Score (0-100)" in row.index and pd.notna(row["AI Score (0-100)"]):
+                partes.append(f"AIScore: {row['AI Score (0-100)']}")
+            return " ".join(partes) if partes else "Student resume"
+
+        df["text"] = df.apply(crear_texto_cv, axis=1)
+        df["label"] = df["Job Role"]
+        df = df[["text", "label"]].dropna()
+    else:
+        raise ValueError("resume_screening.csv no tiene columnas compatibles")
+
+    labels = df["label"].unique()
+    label_to_id = {label: idx for idx, label in enumerate(labels)}
+    df["label"] = df["label"].map(label_to_id)
+    return df, label_to_id
+
+
+def _normalizar_campus_recruitment(df):
+    if "specialisation" in df.columns and "specialization" not in df.columns:
+        df = df.rename(columns={"specialisation": "specialization"})
+    if "degree_t" in df.columns and "Degree" not in df.columns:
+        df = df.rename(columns={"degree_t": "Degree"})
+
+    def crear_texto_perfil(row):
+        textos = []
+        if "Degree" in row and pd.notna(row["Degree"]):
+            textos.append(f"Carrera: {row['Degree']}")
+        if "specialization" in row.index and pd.notna(row.get("specialization")):
+            textos.append(f"Especialización: {row['specialization']}")
+        if "cgpa" in row.index and pd.notna(row.get("cgpa")):
+            textos.append(f"CGPA: {row['cgpa']}")
+        if "mba_p" in row.index and pd.notna(row.get("mba_p")):
+            textos.append(f"MBA%: {row['mba_p']}")
+        if "etest_p" in row.index and pd.notna(row.get("etest_p")):
+            textos.append(f"Etest%: {row['etest_p']}")
+        if "internships" in row.index and pd.notna(row.get("internships")):
+            textos.append(f"Pasantías: {row['internships']}")
+        if "workex" in row.index and pd.notna(row.get("workex")):
+            textos.append(f"WorkEx: {row['workex']}")
+        return " ".join(textos) if textos else "Estudiante"
+
+    df["text"] = df.apply(crear_texto_perfil, axis=1)
+
+    if "status" in df.columns:
+        df = df.rename(columns={"status": "label"})
+
+    label_values = [label for label in df["label"].unique() if pd.notna(label)]
+    label_to_id = {label: idx for idx, label in enumerate(label_values)}
+    df["label"] = df["label"].map(label_to_id)
+    df = df[["text", "label"]].dropna()
+
+    return df, label_to_id
+
+
+def _normalizar_student_performance(df):
+    if (
+        "math score" in df.columns
+        and "reading score" in df.columns
+        and "writing score" in df.columns
+    ):
+        def crear_texto_academico(row):
+            textos = []
+            columnas = [
+                "gender",
+                "race/ethnicity",
+                "parental level of education",
+                "lunch",
+                "test preparation course",
+            ]
+            for col in columnas:
+                if col in row.index and pd.notna(row[col]):
+                    textos.append(f"{col}: {row[col]}")
+            return " ".join(textos) if textos else "Estudiante"
+
+        df["text"] = df.apply(crear_texto_academico, axis=1)
+        df["puntuacion_promedio"] = (df["math score"] + df["reading score"] + df["writing score"]) / 3
+    elif "G1" in df.columns and "G2" in df.columns and "G3" in df.columns:
+        def crear_texto_academico(row):
+            columnas_texto = [
+                "school", "sex", "age", "address", "famsize", "Pstatus",
+                "Medu", "Fedu", "Mjob", "Fjob", "reason", "guardian",
+                "traveltime", "studytime", "failures", "schoolsup", "famsup",
+                "paid", "activities", "internet", "romantic", "absences"
+            ]
+            textos = []
+            for col in columnas_texto:
+                if col in row.index and pd.notna(row[col]):
+                    textos.append(f"{col}:{row[col]}")
+            return " ".join(textos) if textos else "Estudiante"
+
+        df["text"] = df.apply(crear_texto_academico, axis=1)
+        df["puntuacion_promedio"] = (df["G1"] + df["G2"] + df["G3"]) / 3
+    else:
+        raise ValueError("student_performance.csv no tiene columnas compatibles")
+
+    df["label"] = pd.cut(
+        df["puntuacion_promedio"],
+        bins=3,
+        labels=["Bajo", "Medio", "Alto"],
+        include_lowest=True,
+    )
+
+    label_to_id = {"Bajo": 0, "Medio": 1, "Alto": 2}
+    df["label"] = df["label"].astype(str).map(label_to_id)
+    df = df[["text", "label"]].dropna()
+
+    return df, label_to_id
+
+
+def cargar_dataset_talento_desde_csv(nombre_dataset, directorio_datos="./data", tamaño_entrenamiento=None, tamaño_prueba=None):
     """
-    Carga dataset personalizado desde CSV (útil para agregar datasets propios).
-    
+    Carga dataset de talento estudiantil y devuelve DatasetDict + mapeo de etiquetas.
+
     Args:
-        ruta_csv: Ruta al archivo CSV
-        columna_texto: Nombre de la columna de texto
-        columna_etiqueta: Nombre de la columna de etiquetas
-        tamaño_entrenamiento: Cantidad de datos para training
-        tamaño_prueba: Cantidad de datos para testing
-    
+        nombre_dataset: resume_screening | campus_recruitment | student_performance
+        directorio_datos: carpeta con CSVs
+        tamaño_entrenamiento: límite opcional para split train
+        tamaño_prueba: límite opcional para split test
+
     Returns:
-        DatasetDict con splits entrenamiento/prueba
+        tuple(DatasetDict, dict): dataset con splits train/test y label_to_id.
     """
-    
-    datos = pd.read_csv(ruta_csv)
-    
-    # Crear Dataset
-    conjunto_datos = Dataset.from_pandas(datos[[columna_texto, columna_etiqueta]])
-    
-    # Split entrenamiento/prueba
-    division = conjunto_datos.train_test_split(test_size=tamaño_prueba, seed=42)
-    
-    # Limitar tamaños
-    entrenamiento = division["train"].select(range(min(tamaño_entrenamiento, len(division["train"]))))
-    prueba = division["test"].select(range(min(tamaño_prueba, len(division["test"]))))
-    
-    diccionario_conjunto = DatasetDict({"train": entrenamiento, "test": prueba})
-    
-    print(f"✅ Dataset cargado desde {ruta_csv}")
-    print(f"   Muestras entrenamiento: {len(entrenamiento)}")
-    print(f"   Muestras prueba: {len(prueba)}")
-    
-    return diccionario_conjunto
+    rutas = {
+        "resume_screening": "resume_screening.csv",
+        "campus_recruitment": "campus_recruitment.csv",
+        "student_performance": "student_performance.csv",
+    }
+
+    if nombre_dataset not in rutas:
+        raise ValueError("Dataset no soportado")
+
+    ruta = os.path.join(directorio_datos, rutas[nombre_dataset])
+    df = pd.read_csv(ruta)
+
+    if nombre_dataset == "resume_screening":
+        df, label_to_id = _normalizar_resume_screening(df)
+    elif nombre_dataset == "campus_recruitment":
+        df, label_to_id = _normalizar_campus_recruitment(df)
+    else:
+        df, label_to_id = _normalizar_student_performance(df)
+
+    inicio_prueba = len(df) // 2
+    limite_prueba = max(1, len(df) // 4)
+
+    train_df = df.head(inicio_prueba)
+    test_df = df.iloc[inicio_prueba : inicio_prueba + limite_prueba]
+
+    if tamaño_entrenamiento is not None:
+        train_df = train_df.head(tamaño_entrenamiento)
+    if tamaño_prueba is not None:
+        test_df = test_df.head(tamaño_prueba)
+
+    dataset_dict = DatasetDict(
+        {
+            "train": Dataset.from_pandas(train_df.reset_index(drop=True)),
+            "test": Dataset.from_pandas(test_df.reset_index(drop=True)),
+        }
+    )
+
+    return dataset_dict, label_to_id
 
 
 def validar_estructura_dataset(diccionario_conjunto):
-    """Valida que un dataset tenga estructura correcta."""
-    
+    """Valida estructura mínima: train/test con columnas text/label."""
     if not isinstance(diccionario_conjunto, DatasetDict):
         raise TypeError("El dataset debe ser un DatasetDict")
-    
+
     if "train" not in diccionario_conjunto or "test" not in diccionario_conjunto:
         raise ValueError("El dataset debe tener splits 'train' y 'test'")
-    
-    columnas_requeridas = {"texto", "etiqueta"}
-    columnas_entrenamiento = set(diccionario_conjunto["train"].column_names)
-    
-    if not columnas_requeridas.issubset(columnas_entrenamiento):
+
+    columnas_requeridas = {"text", "label"}
+    columnas_train = set(diccionario_conjunto["train"].column_names)
+
+    if not columnas_requeridas.issubset(columnas_train):
         raise ValueError(f"El dataset debe tener columnas: {columnas_requeridas}")
-    
-    print("✅ Estructura del dataset validada")
 
 
 if __name__ == "__main__":
-    # Ejemplo: cargar un dataset personalizado desde CSV
-    # conjunto = cargar_dataset_csv_personalizado("./data/mi_dataset.csv")
-    # validar_estructura_dataset(conjunto)
-    print("📚 Utilidades de datasets disponibles")
-    print("Datasets reales cargados desde HuggingFace:")
-    print("- IMDB (2 clases)")
-    print("- AG News (4 clases)")
-    print("- DBpedia (14 clases)")
-
+    print("📚 Utilidades de datasets de talento estudiantil disponibles")

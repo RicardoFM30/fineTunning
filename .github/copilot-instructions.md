@@ -17,7 +17,7 @@ config.yaml      → Hiperparámetros centralizados
 ```
 
 ### Flujo de Datos Principal
-1. **Load Dataset** → `datasets` library (IMDB, AG News, Custom)
+1. **Load Dataset** → CSVs locales de talento estudiantil (Kaggle)
 2. **Tokenize** → `distilbert-base-uncased` tokenizer
 3. **Train** → `Trainer` API con múltiples configs (5+)
 4. **Evaluate** → Accuracy, F1, Precision, Recall, Confusion Matrix
@@ -28,11 +28,11 @@ config.yaml      → Hiperparámetros centralizados
 
 ### 1. Datasets Diferenciados (Rúbrica: Nivel 5)
 Usar 3 datasets reales con características distintas:
-- **IMDB** (https://huggingface.co/datasets/imdb) - 2 clases, sentimientos generales
-- **AG News** (https://huggingface.co/datasets/ag_news) - 4 clases, noticias multitemáticas
-- **DBpedia** (https://huggingface.co/datasets/dbpedia_14, https://www.dbpedia.org/) - 14 clases, descripciones de entidades
+- **Resume Screening** (https://www.kaggle.com/datasets/mfaisalqureshi/resume-screening-dataset) - 25 clases
+- **Campus Recruitment** (https://www.kaggle.com/datasets/benroshan/campus-recruitment-data) - 2 clases
+- **Student Performance** (https://www.kaggle.com/datasets/spscientist/students-performance-in-exams) - 3 clases
 
-*Patrón:* Cada dataset cargado via `load_dataset()` desde Hugging Face con splits train/test explícitos en `config.yaml`.
+*Patrón:* Cada dataset se carga desde `./data/*.csv` y se normaliza en `train.py`/`data_utils.py`.
 
 ### 2. Experimentación Sistemática (Rúbrica: Nivel 5)
 Mínimo 5 configuraciones variando múltiples parámetros:
@@ -74,12 +74,12 @@ results/
 ## 📋 Developer Workflows
 
 ### 1. Agregar Nuevo Dataset (Real o Personalizado)
-**Datasets reales (Hugging Face):**
+**Datasets reales (Kaggle + CSV local):**
 ```python
 # En config.yaml dentro de conjuntos_datos:
 nueva_dataset:
   nombre: "Nombre descriptivo"
-  # Enlace: https://huggingface.co/datasets/mi_dataset
+  # Enlace: https://www.kaggle.com/datasets/...
   tamaño_entrenamiento: 600
   tamaño_prueba: 100
   num_etiquetas: 5
@@ -87,22 +87,21 @@ nueva_dataset:
 
 # En scripts/train.py, agregar caso en cargar_dataset():
 elif self.nombre_dataset == "nueva_dataset":
-    # Enlace: https://huggingface.co/datasets/mi_dataset
-    conjunto_datos = load_dataset("nombre_en_huggingface")
+    # Cargar CSV en ./data y normalizar columnas text/label
     ...
 ```
 
 **Datasets personalizados (CSV local):**
 ```python
 # Usar función en scripts/data_utils.py:
-conjunto = cargar_dataset_csv_personalizado("./data/mi_dataset.csv")
+conjunto = cargar_dataset_talento_desde_csv("resume_screening")
 ```
 
 ### 2. Entrenar Nueva Configuración
 ```bash
 python scripts/train.py \
   --archivo_config config.yaml \
-  --conjunto_datos imdb \
+  --conjunto_datos resume_screening \
   --modelo distilbert-base-uncased \
   --nombre_config config_1
 ```
@@ -110,7 +109,7 @@ python scripts/train.py \
 
 ### 3. Evaluar y Comparar
 ```bash
-python scripts/evaluate.py --model_dir ./models
+python scripts/evaluate.py --model_dir ./models/<modelo_entrenado> --conjunto_datos resume_screening
 python scripts/compare_results.py --output_dir ./results
 ```
 
@@ -133,7 +132,7 @@ python scripts/compare_results.py --output_dir ./results
 ## 📦 Dependencias Clave
 
 - `transformers==4.49.0` → Modelos HF, Trainer API
-- `datasets==3.5.0` → Cargar datasets IMDB, AG News
+- `datasets==3.5.0` → Estructuras Dataset para entrenamiento
 - `torch==2.6.0` → Backend compu
 - `evaluate==0.4.3` → Calcular métricas
 - `scikit-learn==1.6.1` → Matriz confusión, análisis

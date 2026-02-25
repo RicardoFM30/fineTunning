@@ -1,68 +1,66 @@
-from datasets import load_dataset
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, TrainingArguments, Trainer, pipeline
+"""
+Ejemplo mínimo de fine-tuning para talento estudiantil/juvenil.
+Usa el dataset local `resume_screening.csv` y entrena una corrida corta.
+"""
+
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, TrainingArguments, Trainer
 import evaluate
 import numpy as np
 
-# ===============================
-# 1. CARGAR DATASET
-# ===============================
-dataset = load_dataset("imdb")
-train_dataset = dataset["train"].shuffle(seed=21).select(range(500))
-test_dataset = dataset["test"].shuffle(seed=21).select(range(100))
+from scripts.data_utils import cargar_dataset_talento_desde_csv
 
-# ===============================
-# 2. CARGAR TOKENIZER
-# ===============================
-tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
 
-# ===============================
-# 3. TOKENIZACIÓN
-# ===============================
+# 1) Cargar dataset local
+conjunto, label_to_id = cargar_dataset_talento_desde_csv(
+    "resume_screening",
+    directorio_datos="./data",
+    tamaño_entrenamiento=500,
+    tamaño_prueba=100,
+)
+train_dataset = conjunto["train"]
+test_dataset = conjunto["test"]
+
+# 2) Tokenizador
+modelo_base = "distilbert-base-uncased"
+tokenizer = AutoTokenizer.from_pretrained(modelo_base)
+
+
 def tokenize_function(examples):
-    """
-    Tokeniza los ejemplos del dataset.
-    - padding: obliga a que todas las palabras tengan la misma longitud (añade espacios vacíos)
-    - truncation: recorta el número máximo de tokens de un texto
-    - batched: procesa los datos en grupos (lotes) en lugar de uno por uno
-    """
-    return tokenizer(examples["text"], padding="max_length", truncation=True)
+    return tokenizer(examples["text"], padding="max_length", truncation=True, max_length=256)
+
 
 tokenized_train = train_dataset.map(tokenize_function, batched=True)
 tokenized_test = test_dataset.map(tokenize_function, batched=True)
 
-# ===============================
-# 4. CARGAR MODELO
-# ===============================
+tokenized_train = tokenized_train.remove_columns(["text"])
+tokenized_test = tokenized_test.remove_columns(["text"])
+
+# 3) Modelo
 model = AutoModelForSequenceClassification.from_pretrained(
-    "distilbert-base-uncased",
-    num_labels=2  # positivo/negativo
+    modelo_base,
+    num_labels=len(label_to_id),
 )
 
-# ===============================
-# 5. DEFINIR MÉTRICA
-# ===============================
+# 4) Métrica
 metric = evaluate.load("accuracy")
+
 
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
     predictions = np.argmax(logits, axis=-1)
     return metric.compute(predictions=predictions, references=labels)
 
-# ===============================
-# 6. CONFIGURAR ENTRENAMIENTO
-# ===============================
+
+# 5) Entrenamiento breve
 training_args = TrainingArguments(
-    output_dir="test_trainer",  # Ruta donde se guardará el entrenamiento
-    evaluation_strategy="epoch",  # Valida cada epoch (cada pasada completa por el dataset)
-    per_device_train_batch_size=2,  # Elementos procesados a la vez en entrenamiento
-    per_device_eval_batch_size=2,  # Elementos procesados a la vez en evaluación
-    learning_rate=2e-5,  # Ratio de aprendizaje
-    num_train_epochs=1,  # Número de épocas
+    output_dir="test_trainer_talento",
+    evaluation_strategy="epoch",
+    per_device_train_batch_size=4,
+    per_device_eval_batch_size=4,
+    learning_rate=2e-5,
+    num_train_epochs=1,
 )
 
-# ===============================
-# 7. ENTRENAR MODELO
-# ===============================
 trainer = Trainer(
     model=model,
     args=training_args,
@@ -72,21 +70,7 @@ trainer = Trainer(
 )
 trainer.train()
 
-# ===============================
-# 8. GUARDAR MODELO
-# ===============================
-model.save_pretrained("./mi_modelo_entrenado")
-tokenizer.save_pretrained("./mi_modelo_entrenado")
-
-# ===============================
-# 9. USAR MODELO PARA PREDICCIÓN
-# ===============================
-clasificador = pipeline(
-    "sentiment-analysis",
-    model="./mi_modelo_entrenado",
-    tokenizer="./mi_modelo_entrenado"
-)
-
-frase = "This movie was surprisingly good, I enjoyed it a lot!"
-resultado = clasificador(frase)
-print(resultado)
+# 6) Guardado
+model.save_pretrained("./mi_modelo_talento")
+tokenizer.save_pretrained("./mi_modelo_talento")
+print("Modelo guardado en ./mi_modelo_talento")

@@ -7,11 +7,10 @@ import os
 import json
 import argparse
 import numpy as np
-from pathlib import Path
 from datetime import datetime
 
 import torch
-from datasets import load_dataset, DatasetDict, Dataset
+from datasets import Dataset
 from transformers import (
     AutoTokenizer,
     AutoModelForSequenceClassification,
@@ -19,6 +18,15 @@ from transformers import (
     Trainer,
 )
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+
+
+def validar_csv_requerido(ruta_archivo):
+    """Valida que el CSV exista y tenga contenido antes de entrenar."""
+    if not os.path.exists(ruta_archivo) or os.path.getsize(ruta_archivo) == 0:
+        raise FileNotFoundError(
+            f"❌ No se encontró el archivo requerido: {ruta_archivo}\n"
+            "   Descárgalo manualmente y colócalo en ./data con ese nombre."
+        )
 
 
 class EntrenadorFineTuning:
@@ -32,7 +40,7 @@ class EntrenadorFineTuning:
     
     Attributes:
         configuracion: Diccionario con toda la configuración del proyecto
-        nombre_dataset: Nombre del dataset (imdb, ag_news, dbpedia)
+        nombre_dataset: Nombre del dataset (resume_screening, campus_recruitment, student_performance)
         nombre_modelo: Nombre del modelo HF (ej: distilbert-base-uncased)
         configuracion_entrenamiento: Dict con hiperparámetros
         dispositivo: Dispositivo computacional (cuda o cpu)
@@ -45,7 +53,7 @@ class EntrenadorFineTuning:
         
         Args:
             configuracion: Diccionario de configuración general (cargado de config.yaml)
-            nombre_dataset: Nombre del dataset a usar (imdb, ag_news, dbpedia)
+            nombre_dataset: Nombre del dataset a usar (resume_screening, campus_recruitment, student_performance)
             nombre_modelo: Nombre del modelo HF (ej: distilbert-base-uncased)
             configuracion_entrenamiento: Diccionario con hiperparámetros:
                 - tasa_aprendizaje: learning rate
@@ -67,6 +75,7 @@ class EntrenadorFineTuning:
         self.nombre_modelo = nombre_modelo
         self.configuracion_entrenamiento = configuracion_entrenamiento
         self.dispositivo = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.label_to_id = None
         print(f"✅ Dispositivo: {self.dispositivo}")
         
         # Crear directorio para este experimento
@@ -104,16 +113,41 @@ class EntrenadorFineTuning:
             print(f"   Fuente: ./data/resume_screening.csv")
             print(f"   Tarea: Clasificar CV → Tipo de profesional (IT, Finance, HR, etc.)")
             
-            df = pd.read_csv(f"{ruta_datos}/resume_screening.csv")
+            ruta_csv = f"{ruta_datos}/resume_screening.csv"
+            validar_csv_requerido(ruta_csv)
+            df = pd.read_csv(ruta_csv)
             
-            # Renombrar columnas para estandarización
-            if "resume_text" in df.columns:
-                df = df.rename(columns={"resume_text": "text"})
-            if "Category" in df.columns:
-                df = df.rename(columns={"Category": "label"})
-            
-            # Seleccionar solo columnas necesarias
-            df = df[["text", "label"]].dropna()
+            # Formato clásico: resume_text + Category
+            if "resume_text" in df.columns and "Category" in df.columns:
+                df = df.rename(columns={"resume_text": "text", "Category": "label"})
+                df = df[["text", "label"]].dropna()
+            # Formato alternativo detectado: Skills/Experience/... + Job Role
+            elif "Job Role" in df.columns:
+                def crear_texto_cv(row):
+                    partes = []
+                    if "Skills" in row.index and pd.notna(row["Skills"]):
+                        partes.append(f"Skills: {row['Skills']}")
+                    if "Experience (Years)" in row.index and pd.notna(row["Experience (Years)"]):
+                        partes.append(f"ExperienceYears: {row['Experience (Years)']}")
+                    if "Education" in row.index and pd.notna(row["Education"]):
+                        partes.append(f"Education: {row['Education']}")
+                    if "Certifications" in row.index and pd.notna(row["Certifications"]):
+                        partes.append(f"Certifications: {row['Certifications']}")
+                    if "Projects Count" in row.index and pd.notna(row["Projects Count"]):
+                        partes.append(f"ProjectsCount: {row['Projects Count']}")
+                    if "AI Score (0-100)" in row.index and pd.notna(row["AI Score (0-100)"]):
+                        partes.append(f"AIScore: {row['AI Score (0-100)']}")
+                    return " ".join(partes) if partes else "Student resume"
+
+                df["text"] = df.apply(crear_texto_cv, axis=1)
+                df["label"] = df["Job Role"]
+                df = df[["text", "label"]].dropna()
+            else:
+                raise ValueError(
+                    "❌ resume_screening.csv no tiene columnas compatibles.\n"
+                    f"   Columnas encontradas: {list(df.columns)}\n"
+                    "   Se esperaba ('resume_text','Category') o una columna 'Job Role'."
+                )
             
             # Convertir labels a índices numéricos
             labels_unicos = df["label"].unique()
@@ -128,14 +162,23 @@ class EntrenadorFineTuning:
             conjunto_prueba = Dataset.from_pandas(df.iloc[len(df)//2:len(df)//2 + tamaño_prueba])
             
             num_etiquetas = len(labels_unicos)
+            self.label_to_id = {str(k): int(v) for k, v in label_to_id.items()}
             
         elif self.nombre_dataset == "campus_recruitment":
             # Campus Recruitment: Clasificar por estado de colocación
             print(f"   Fuente: ./data/campus_recruitment.csv")
             print(f"   Tarea: Predecir colocación de estudiante (Colocado/No colocado)")
             
-            df = pd.read_csv(f"{ruta_datos}/campus_recruitment.csv")
+            ruta_csv = f"{ruta_datos}/campus_recruitment.csv"
+            validar_csv_requerido(ruta_csv)
+            df = pd.read_csv(ruta_csv)
             
+            # Normalizaciones de columnas para variantes del dataset
+            if "specialisation" in df.columns and "specialization" not in df.columns:
+                df = df.rename(columns={"specialisation": "specialization"})
+            if "degree_t" in df.columns and "Degree" not in df.columns:
+                df = df.rename(columns={"degree_t": "Degree"})
+
             # Crear un "texto" sintetizado a partir de características
             def crear_texto_perfil(row):
                 textos = []
@@ -145,8 +188,14 @@ class EntrenadorFineTuning:
                     textos.append(f"Especialización: {row['specialization']}")
                 if "cgpa" in row.index and pd.notna(row.get("cgpa")):
                     textos.append(f"CGPA: {row['cgpa']}")
+                if "mba_p" in row.index and pd.notna(row.get("mba_p")):
+                    textos.append(f"MBA%: {row['mba_p']}")
+                if "etest_p" in row.index and pd.notna(row.get("etest_p")):
+                    textos.append(f"Etest%: {row['etest_p']}")
                 if "internships" in row.index and pd.notna(row.get("internships")):
                     textos.append(f"Pasantías: {row['internships']}")
+                if "workex" in row.index and pd.notna(row.get("workex")):
+                    textos.append(f"WorkEx: {row['workex']}")
                 return " ".join(textos) if textos else "Estudiante"
             
             df["text"] = df.apply(crear_texto_perfil, axis=1)
@@ -169,30 +218,55 @@ class EntrenadorFineTuning:
             conjunto_prueba = Dataset.from_pandas(df.iloc[len(df)//2:len(df)//2 + tamaño_prueba][["text", "label"]])
             
             num_etiquetas = len(label_to_id)
+            self.label_to_id = {str(k): int(v) for k, v in label_to_id.items()}
             
         elif self.nombre_dataset == "student_performance":
             # Student Performance: Clasificar por desempeño
             print(f"   Fuente: ./data/student_performance.csv")
             print(f"   Tarea: Clasificar nivel de rendimiento académico")
             
-            df = pd.read_csv(f"{ruta_datos}/student_performance.csv")
+            ruta_csv = f"{ruta_datos}/student_performance.csv"
+            validar_csv_requerido(ruta_csv)
+            df = pd.read_csv(ruta_csv)
             
-            # Crear texto sintetizado
-            def crear_texto_academico(row):
-                textos = []
-                for col in ["gender", "race/ethnicity", "parental level of education", "lunch", "test preparation course"]:
-                    if col in row.index and pd.notna(row[col]):
-                        textos.append(f"{col}: {row[col]}")
-                return " ".join(textos) if textos else "Estudiante"
-            
-            df["text"] = df.apply(crear_texto_academico, axis=1)
-            
-            # Crear etiqueta basada en puntaje promedio
+            # Formato 1: students-performance-in-exams (math/reading/writing)
             if "math score" in df.columns and "reading score" in df.columns and "writing score" in df.columns:
+                def crear_texto_academico(row):
+                    textos = []
+                    for col in ["gender", "race/ethnicity", "parental level of education", "lunch", "test preparation course"]:
+                        if col in row.index and pd.notna(row[col]):
+                            textos.append(f"{col}: {row[col]}")
+                    return " ".join(textos) if textos else "Estudiante"
+
+                df["text"] = df.apply(crear_texto_academico, axis=1)
                 df["puntuacion_promedio"] = (df["math score"] + df["reading score"] + df["writing score"]) / 3
-                df["label"] = pd.cut(df["puntuacion_promedio"], bins=3, labels=["Bajo", "Medio", "Alto"], include_lowest=True)
-                label_to_id = {"Bajo": 0, "Medio": 1, "Alto": 2}
-                df["label"] = df["label"].astype(str).map(label_to_id)
+            # Formato 2: student-performance-data-set (G1/G2/G3)
+            elif "G1" in df.columns and "G2" in df.columns and "G3" in df.columns:
+                def crear_texto_academico(row):
+                    columnas_texto = [
+                        "school", "sex", "age", "address", "famsize", "Pstatus",
+                        "Medu", "Fedu", "Mjob", "Fjob", "reason", "guardian",
+                        "traveltime", "studytime", "failures", "schoolsup", "famsup",
+                        "paid", "activities", "internet", "romantic", "absences"
+                    ]
+                    textos = []
+                    for col in columnas_texto:
+                        if col in row.index and pd.notna(row[col]):
+                            textos.append(f"{col}:{row[col]}")
+                    return " ".join(textos) if textos else "Estudiante"
+
+                df["text"] = df.apply(crear_texto_academico, axis=1)
+                df["puntuacion_promedio"] = (df["G1"] + df["G2"] + df["G3"]) / 3
+            else:
+                raise ValueError(
+                    "❌ student_performance.csv no tiene columnas compatibles.\n"
+                    f"   Columnas encontradas: {list(df.columns)}\n"
+                    "   Se esperaba (math score/reading score/writing score) o (G1/G2/G3)."
+                )
+
+            df["label"] = pd.cut(df["puntuacion_promedio"], bins=3, labels=["Bajo", "Medio", "Alto"], include_lowest=True)
+            label_to_id = {"Bajo": 0, "Medio": 1, "Alto": 2}
+            df["label"] = df["label"].astype(str).map(label_to_id)
             
             df = df.dropna(subset=["label"])
             
@@ -204,6 +278,7 @@ class EntrenadorFineTuning:
             conjunto_prueba = Dataset.from_pandas(df.iloc[len(df)//2:len(df)//2 + tamaño_prueba][["text", "label"]])
             
             num_etiquetas = 3  # Bajo, Medio, Alto
+            self.label_to_id = {"Bajo": 0, "Medio": 1, "Alto": 2}
             
         else:
             raise ValueError(f"❌ Dataset {self.nombre_dataset} no soportado. Disponibles: resume_screening, campus_recruitment, student_performance")
@@ -244,11 +319,8 @@ class EntrenadorFineTuning:
         
         def funcion_tokenizar(ejemplos):
             """Tokeniza un batch de ejemplos."""
-            # El campo de texto varía: "text" (IMDB, AG News), "content" (DBpedia)
-            campo_texto = "text" if "text" in ejemplos else ("title" if "title" in ejemplos else "content")
-            
             return self.tokenizador(
-                ejemplos[campo_texto],
+                ejemplos["text"],
                 padding="max_length",
                 truncation=True,
                 max_length=256
@@ -397,6 +469,7 @@ class EntrenadorFineTuning:
             json.dump({
                 "dataset": self.nombre_dataset,
                 "model": self.nombre_modelo,
+                "label_to_id": self.label_to_id,
                 "training_config": self.configuracion_entrenamiento,
                 "results": resultado_entrenamiento.metrics,
             }, archivo, indent=2)
