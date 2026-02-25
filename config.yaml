@@ -1,0 +1,91 @@
+# Configuración Central del Proyecto Fine-tuning
+
+# Modelos a Experimentar
+modelos:
+  - distilbert-base-uncased
+  - bert-base-uncased
+  - distilroberta-base
+
+# Configuraciones de Hiperparámetros
+configuraciones_entrenamiento:
+  config_1:
+    tasa_aprendizaje: 2e-5
+    tamaño_lote: 8
+    épocas: 3
+    pasos_calentamiento: 500
+    decaimiento_peso: 0.01
+    
+  config_2:
+    tasa_aprendizaje: 5e-5
+    tamaño_lote: 16
+    épocas: 5
+    pasos_calentamiento: 500
+    decaimiento_peso: 0.01
+    
+  config_3:
+    tasa_aprendizaje: 1e-4
+    tamaño_lote: 32
+    épocas: 10
+    pasos_calentamiento: 1000
+    decaimiento_peso: 0.1
+    
+  config_4:
+    tasa_aprendizaje: 2e-5
+    tamaño_lote: 16
+    épocas: 5
+    pasos_calentamiento: 0
+    decaimiento_peso: 0
+    
+  config_5:
+    tasa_aprendizaje: 5e-5
+    tamaño_lote: 8
+    épocas: 10
+    pasos_calentamiento: 1000
+    decaimiento_peso: 0.1
+
+# Datasets Reales
+# Fuente: https://huggingface.co/datasets
+conjuntos_datos:
+  imdb:
+    nombre: "IMDB Movie Reviews"
+    # Enlace: https://huggingface.co/datasets/imdb
+    tamaño_entrenamiento: 500
+    tamaño_prueba: 100
+    num_etiquetas: 2
+    descripcion: "Reseñas de películas clasificadas como positivas/negativas"
+    
+  ag_news:
+    nombre: "AG News Categories"
+    # Enlace: https://huggingface.co/datasets/ag_news
+    tamaño_entrenamiento: 600
+    tamaño_prueba: 100
+    num_etiquetas: 4
+    descripcion: "Noticias clasificadas en 4 categorías: World, Sports, Business, Sci/Tech"
+    
+  dbpedia:
+    nombre: "DBpedia 14 Classes"
+    # Enlace: https://huggingface.co/datasets/dbpedia_14
+    # Dataset público: https://www.dbpedia.org/
+    tamaño_entrenamiento: 600
+    tamaño_prueba: 100
+    num_etiquetas: 14
+    descripcion: "Descripciones de entidades DBpedia en 14 categorías: Company, Artist, Athlete, etc"
+
+# Rutas
+rutas:
+  directorio_datos: "./data"
+  directorio_modelos: "./models"
+  directorio_resultados: "./results"
+  directorio_notebooks: "./notebooks"
+
+# Evaluación
+evaluacion:
+  metricas:
+    - exactitud
+    - precisión
+    - recall
+    - f1
+  calcular_matriz_confusión: true
+  graficar_curvas_pérdida: true
+  analizar_sobreajuste: true
+
